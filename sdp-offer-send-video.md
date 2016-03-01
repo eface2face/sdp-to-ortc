@@ -8,24 +8,24 @@ A WebRTC 1.0 browser is willing to send its webcam video without receiving any a
 ```js
 // Request webcam access
 navigator.mediaDevices.getUserMedia({ audio: false, video: true })
-    .then(function(stream)
-    {
-        // Create a RTCPeerConnection
-        var pc = new RTCPeerConnection({ iceServers: [] });
+  .then(function(stream)
+  {
+    // Create a RTCPeerConnection
+    var pc = new RTCPeerConnection({ iceServers: [] });
 
-        // Add our local MediaStream
-        pc.addStream(stream);
+    // Add our local MediaStream
+    pc.addStream(stream);
 
-        // Create a SDP offer without audio m= line
-        pc.createOffer({ offerToReceiveAudio: 0 })
-            .then(function(desc)
-            {
-                console.log('SDP offer:\n%s', desc.sdp);
-            });
-    });
+    // Create a SDP offer without audio m= line
+    pc.createOffer({ offerToReceiveAudio: 0 })
+      .then(function(desc)
+      {
+        console.log('SDP offer:\n%s', desc.sdp);
+       });
+  });
 ```
 
-The generated SDP offers looks as follows (Chrome M48):
+The generated SDP offer looks as follows (Chrome M48):
 
 ```
 v=0
@@ -82,4 +82,88 @@ a=ssrc:1592093127 cname:30uugWU8uBaMClU0
 a=ssrc:1592093127 msid:5FycVqBH7W4UNDJJuzzikeHgN97FA7YZLAGJ e293cdb4-15d9-4824-be8b-f4d93fe8a96f
 a=ssrc:1592093127 mslabel:5FycVqBH7W4UNDJJuzzikeHgN97FA7YZLAGJ
 a=ssrc:1592093127 label:e293cdb4-15d9-4824-be8b-f4d93fe8a96f
+```
+
+
+## Conversion to ORTC
+
+Given the above SDP offer let's use the ORTC API to express the same funcionality.
+
+
+### RTCIceGatherer
+
+We need a `RTCIceGatherer` to get our local ICE candidates.
+
+```js
+// Create RTCIceGatherer object
+var iceGatherer = new RTCIceGatherer({ iceServers: [] });
+
+// Prepare to signal local candidates
+iceGatherer.addEventListener('localcandidate', function(event)
+{
+  // Signal event.candidate to the remote peer
+});
+```
+
+
+### RTCIceTransport
+
+Given that we send a single video track we need a single `RTCIceTransport` instance.
+
+```js
+// Create RTCIceTransport object
+var iceTransport = new RTCIceTransport(iceGatherer);
+
+// Via signaling we receive the remote ICE parameters
+var iceRemoteParameters = { usernameFragment: 'xxxxxxx', password: 'xxxxxxx' };
+
+// Start our ICE transport with 'controlling' role
+iceTransport.start(null, iceRemoteParameters, 'controlling');
+```
+
+
+### RTCDtlsTransport
+
+We need a `RTCDtlsTransport` and a certificate for it.
+
+```js
+// Create the DTLS certificate and parameters
+var dtlsTransport;
+
+RTCCertificate.generateCertificate({ name: "ECDSA", namedCurve: "P-256" })
+  .then(function(cert)
+  {
+    var dtlsParameters = new RTCDtlsParameters();
+
+    // Obtain the fingerprint of the created certificate
+    dtlsParameters.fingerprints[0] = cert.fingerprint;
+
+    // Initialize our DTLS transport
+    dtlsTransport = new RTCDtlsTransport(iceTransport, cert);
+
+    // Via signaling we receive the remote DTLS parameters
+    var dtlsRemoteParameters = { role: 'xxxx', fingerprints: [ 'xxxx'] };
+    
+    // Start the DTLS connection
+    dtlsTransport.start(dtlsRemoteParameters);
+  });
+```
+
+
+### RTCRtpSender
+
+We are about sending our webcam video so we need a `RTCRtpSender` for it.
+
+```js
+// Let localStream be a MediaStream with just video retrieved via getUserMedia()
+var videoTrack = localStream.getVideoTracks()[0];
+
+// Create a RTP sender for our video track
+var rtpSender = new RTCRtpSender(videoTrack, dtlsTransport);
+```
+
+By inspecting the `m=video` line of the SDP offer above we must fill our `RTCRtpParameters` object and pass it to the `rtpSender.start()` method.
+
+```js
+// TODO
 ```
